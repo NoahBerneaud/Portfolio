@@ -1,0 +1,6 @@
+.venv
+*.ppm
+.DS_Store
+M2_Informatique
+glove.6B.50d.txt
+logs

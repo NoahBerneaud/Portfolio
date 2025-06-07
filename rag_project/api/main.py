@@ -3,16 +3,17 @@ from pydantic import BaseModel
 from typing import List
 import requests
 
-try:  # haystack-ai optional for static checks
-    from haystack.document_stores import MilvusDocumentStore
-    from haystack.nodes import EmbeddingRetriever
+try:  # milvus_haystack optional for static checks
+    from milvus_haystack import MilvusDocumentStore
+    from milvus_haystack.milvus_embedding_retriever import MilvusEmbeddingRetriever
 except ImportError:  # pragma: no cover - library optional
     MilvusDocumentStore = None  # type: ignore
-    EmbeddingRetriever = None  # type: ignore
+    MilvusEmbeddingRetriever = None  # type: ignore
 
 app = FastAPI(title="Simple RAG API")
 
-MILVUS_COLLECTION_NAME = "documents"
+MILVUS_DB_URI = "./rag_project/milvus.db"
+MILVUS_COLLECTION_NAME = "piaf_1"
 LM_STUDIO_ENDPOINT = "http://localhost:8080"
 
 class Query(BaseModel):
@@ -20,12 +21,15 @@ class Query(BaseModel):
     top_k: int = 5
 
 def search_in_milvus(text: str, top_k: int) -> List[str]:
-    """Return ``top_k`` documents related to ``text`` using Haystack."""
-    if MilvusDocumentStore is None or EmbeddingRetriever is None:
-        raise HTTPException(status_code=500, detail="haystack-ai not installed")
+    """Return ``top_k`` documents related to ``text`` using Milvus."""
+    if MilvusDocumentStore is None or MilvusEmbeddingRetriever is None:
+        raise HTTPException(status_code=500, detail="milvus_haystack not installed")
     try:
-        doc_store = MilvusDocumentStore(collection_name=MILVUS_COLLECTION_NAME)
-        retriever = EmbeddingRetriever(document_store=doc_store)
+        doc_store = MilvusDocumentStore(
+            connection_args={"uri": MILVUS_DB_URI},
+            collection_name=MILVUS_COLLECTION_NAME,
+        )
+        retriever = MilvusEmbeddingRetriever(document_store=doc_store, top_k=top_k)
         docs = retriever.retrieve(text, top_k=top_k)
         return [d.content for d in docs]
     except Exception as exc:  # pragma: no cover - runtime depends on Haystack/Milvus

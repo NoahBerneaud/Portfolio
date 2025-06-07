@@ -3,45 +3,81 @@ from pydantic import BaseModel
 from typing import List
 import requests
 
-try:  # haystack-ai optional for static checks
-    from haystack.document_stores import MilvusDocumentStore
-    from haystack.nodes import EmbeddingRetriever
-except ImportError:  # pragma: no cover - library optional
-    MilvusDocumentStore = None  # type: ignore
-    EmbeddingRetriever = None  # type: ignore
+from haystack import Pipeline
+from haystack.utils import Secret
+from milvus_haystack import MilvusDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder
+from milvus_haystack import MilvusEmbeddingRetriever
 
 app = FastAPI(title="Simple RAG API")
 
-MILVUS_COLLECTION_NAME = "documents"
-LM_STUDIO_ENDPOINT = "http://localhost:8080"
+MODEL_NAME = "Lajavaness/bilingual-embedding-large"
+
+MILVUS_COLLECTION_NAME = "piaf_final_model"
+LM_STUDIO_ENDPOINT = "http://localhost:1234"
 
 class Query(BaseModel):
     text: str
     top_k: int = 5
 
 def search_in_milvus(text: str, top_k: int) -> List[str]:
-    """Return ``top_k`` documents related to ``text`` using Haystack."""
-    if MilvusDocumentStore is None or EmbeddingRetriever is None:
-        raise HTTPException(status_code=500, detail="haystack-ai not installed")
+    """Return ``top_k`` documents related to ``text`` using Haystack + Milvus."""
+    # Vérification rapide
+    if MilvusDocumentStore is None or MilvusEmbeddingRetriever is None:
+        raise HTTPException(
+            status_code=500,
+            detail="haystack-ai et milvus-haystack doivent être installés"
+        )
+
     try:
-        doc_store = MilvusDocumentStore(collection_name=MILVUS_COLLECTION_NAME)
-        retriever = EmbeddingRetriever(document_store=doc_store)
-        docs = retriever.retrieve(text, top_k=top_k)
-        return [d.content for d in docs]
-    except Exception as exc:  # pragma: no cover - runtime depends on Haystack/Milvus
-        raise HTTPException(status_code=500, detail=f"Haystack error: {exc}")
+        # 1) Initialisation du DocumentStore
+        document_store = MilvusDocumentStore(
+            connection_args={"uri": "./milvus.db"},
+            drop_old=False,
+            collection_name=MILVUS_COLLECTION_NAME
+        )
+
+        # 2) Création du pipeline
+        retrieval_pipeline = Pipeline()
+        # (a) Embedder — ici l’embedder official OpenAI
+        embedder = SentenceTransformersTextEmbedder(model=MODEL_NAME,trust_remote_code=True)
+        retrieval_pipeline.add_component("embedder", embedder)
+        # (b) Retriever
+        retriever = MilvusEmbeddingRetriever(
+            document_store=document_store,
+            top_k=top_k
+        )
+        retrieval_pipeline.add_component("retriever", retriever)
+        retrieval_pipeline.connect("embedder", "retriever")
+
+        # 3) Exécution de la recherche
+        # on met le texte en entrée de l’embedder
+        pipeline_result = retrieval_pipeline.run(
+            {"embedder": {"text": text}}
+        )
+        # 4) Extraction et renvoi des contenus
+        docs = pipeline_result["retriever"]["documents"]
+        return [doc.content for doc in docs]
+
+    except Exception as exc:
+        # Pour que vos tests restent verts, on capture tout
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur Haystack/Milvus : {exc}"
+        )
 
 def query_lm_studio(prompt: str) -> str:
     """Send the prompt to LM Studio and return the generated answer."""
     try:
+        print(f"Querying LM Studio with prompt: {prompt}")  # Debugging line
         response = requests.post(
             f"{LM_STUDIO_ENDPOINT}/v1/chat/completions",
-            json={"prompt": prompt},
+            json={"messages": [{"role": "user", "content": prompt}]},
             timeout=30,
         )
         response.raise_for_status()
         data = response.json()
-        return data.get("text", "")
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
     except Exception as exc:  # pragma: no cover - network call
         raise HTTPException(status_code=500, detail=f"LM Studio error: {exc}")
 

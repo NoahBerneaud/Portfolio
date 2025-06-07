@@ -32,7 +32,7 @@ def search_in_milvus(text: str, top_k: int) -> List[str]:
     try:
         # 1) Initialisation du DocumentStore
         document_store = MilvusDocumentStore(
-            connection_args={"uri": "./milvus.db"},
+            connection_args={"uri": "../milvus.db"},
             drop_old=False,
             collection_name=MILVUS_COLLECTION_NAME
         )
@@ -73,7 +73,6 @@ def query_lm_studio(prompt: str) -> str:
         response = requests.post(
             f"{LM_STUDIO_ENDPOINT}/v1/chat/completions",
             json={"messages": [{"role": "user", "content": prompt}]},
-            timeout=30,
         )
         response.raise_for_status()
         data = response.json()

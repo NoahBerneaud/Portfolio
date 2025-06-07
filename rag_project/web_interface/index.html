@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Assistant Vocal RAG - Mode Sombre</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white">
+  <div class="max-w-2xl mx-auto my-10 bg-gray-800 shadow-lg rounded-lg p-6">
+
+    <div class="text-center mb-6">
+      <h2 class="text-2xl font-semibold">Assistant RAG Vocal</h2>
+    </div>
+
+    <div id="chat" class="h-64 overflow-auto bg-gray-700 p-4 rounded-md mb-4">
+      <!-- Les messages apparaîtront ici -->
+    </div>
+
+    <div class="flex gap-2">
+      <input type="text" id="input-text" placeholder="Tapez votre question..."
+             class="flex-grow p-2 bg-gray-700 border border-gray-600 rounded-md text-white"/>
+      <button id="send-btn" class="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-md">
+        Envoyer
+      </button>
+      <button id="voice-btn" class="bg-green-600 hover:bg-green-500 text-white p-2 rounded-md">
+        🎙️
+      </button>
+    </div>
+
+    <audio id="response-audio" class="hidden mt-4 w-full" controls></audio>
+  </div>
+
+  <script>
+    const chatBox = document.getElementById("chat");
+    const sendBtn = document.getElementById("send-btn");
+    const voiceBtn = document.getElementById("voice-btn");
+
+    function addMessage(text, sender) {
+      const wrapper = document.createElement("div");
+      wrapper.className = sender === 'user' ? 'text-right mb-2' : 'text-left mb-2';
+      const bubble = document.createElement("span");
+      bubble.className = `inline-block p-2 rounded-md bg-${sender==='user' ? 'blue' : 'gray'}-600`;
+      bubble.textContent = text;
+      wrapper.appendChild(bubble);
+      chatBox.appendChild(wrapper);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // Envoi de texte à /rag
+    sendBtn.onclick = async () => {
+      const input = document.getElementById("input-text");
+      const text = input.value.trim();
+      if (!text) return;
+      addMessage(text, 'user');
+      input.value = '';
+      sendBtn.disabled = true;
+      try {
+        const res = await fetch('http://127.0.0.1:8000/rag', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ text, top_k: 5 })
+        });
+        const data = await res.json();
+        addMessage(data.answer, 'bot');
+
+        // Simuler audio_url si présent
+        if (data.audio_url) {
+          const blob = await fetch(data.audio_url).then(r => r.blob());
+          const url = URL.createObjectURL(blob);
+          const audio = document.getElementById('response-audio');
+          audio.src = url;
+          audio.classList.remove('hidden');
+          audio.play();
+        }
+      } catch (e) {
+        addMessage('Erreur de communication avec le serveur.', 'bot');
+        console.error(e);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+
+    // Envoi audio à /rag/audio (endpoint fictif pour plus tard)
+    voiceBtn.onclick = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.start();
+      voiceBtn.disabled = true;
+
+      // Enregistrer 5 secondes
+      setTimeout(() => recorder.stop(), 5000);
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        const form = new FormData();
+        form.append('audio', blob, 'question.wav');
+
+        try {
+          const res = await fetch('/rag/audio', { method: 'POST', body: form });
+          const data = await res.json();
+          addMessage(data.answer, 'bot');
+
+          if (data.audio_url) {
+            const audioResp = await fetch(data.audio_url).then(r => r.blob());
+            const url = URL.createObjectURL(audioResp);
+            const audioEl = document.getElementById('response-audio');
+            audioEl.src = url;
+            audioEl.classList.remove('hidden');
+            audioEl.play();
+          }
+        } catch (err) {
+          addMessage('Erreur de communication avec le serveur.', 'bot');
+          console.error(err);
+        } finally {
+          voiceBtn.disabled = false;
+        }
+      };
+      recorder.onerror = e => {
+        addMessage('Erreur lors de l\'enregistrement audio.', 'bot');
+        console.error(e);
+        voiceBtn.disabled = false;
+      };
+      recorder.start();
+    };
+  </script>
+</body>
+</html>
+<!-- Note: This HTML file is designed to work with a backend server that handles the /rag and /rag/audio endpoints. -->

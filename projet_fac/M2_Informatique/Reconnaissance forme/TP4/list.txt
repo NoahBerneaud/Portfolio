@@ -1,0 +1,8 @@
+images/house2.ppm
+images/house1.ppm
+images/plan1.jpg
+images/plan2.jpg
+images/trees1.jpg
+images/trees2.jpg
+images/tree1.jpg
+images/tree2.jpg 

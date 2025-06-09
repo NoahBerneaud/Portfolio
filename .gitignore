@@ -4,3 +4,6 @@
 M2_Informatique
 glove.6B.50d.txt
 logs
+.env
+__pycache__
+milvus.db

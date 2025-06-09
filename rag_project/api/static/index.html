@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assistant Vocal RAG – Mode Sombre</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white">
+  <div class="max-w-2xl mx-auto my-10 bg-gray-800 shadow-lg rounded-lg p-6">
+    <div class="text-center mb-6">
+      <h2 class="text-2xl font-semibold">Assistant RAG Vocal</h2>
+    </div>
+
+    <div id="chat" class="h-64 overflow-auto bg-gray-700 p-4 rounded-md mb-2"></div>
+    <div id="status" class="text-center text-gray-400 mb-4">Prêt.</div>
+
+    <div class="flex gap-2">
+      <input
+        type="text"
+        id="input-text"
+        placeholder="Tapez votre question…"
+        class="flex-grow p-2 bg-gray-700 border border-gray-600 rounded-md text-white"
+      />
+      <button id="send-btn" class="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-md">
+        Envoyer
+      </button>
+      <button id="voice-btn" class="bg-green-600 hover:bg-green-500 text-white p-2 rounded-md">
+        🎙️
+      </button>
+    </div>
+
+    <audio id="response-audio" class="hidden mt-4 w-full" controls></audio>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const chatBox = document.getElementById('chat');
+      const status = document.getElementById('status');
+      const sendBtn = document.getElementById('send-btn');
+      const voiceBtn = document.getElementById('voice-btn');
+      const input = document.getElementById('input-text');
+      const audioEl = document.getElementById('response-audio');
+
+      function addMessage(text, sender) {
+        const wrapper = document.createElement('div');
+        wrapper.className = sender === 'user' ? 'text-right mb-2' : 'text-left mb-2';
+        const bubble = document.createElement('span');
+        bubble.className = `inline-block p-2 rounded-md bg-${sender === 'user' ? 'blue' : 'gray'}-600`;
+        bubble.textContent = text;
+        wrapper.appendChild(bubble);
+        chatBox.appendChild(wrapper);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+
+      async function sendText(text) {
+        addMessage(text, 'user');
+        status.textContent = "L'IA réfléchit…";
+        try {
+          const res = await fetch('/rag', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, top_k: 4 })
+          });
+          const data = await res.json();
+          addMessage(data.answer, 'bot');
+          playAudio(data.audio_url);
+        } catch (err) {
+          addMessage('Erreur de communication avec le serveur.', 'bot');
+          console.error(err);
+        } finally {
+          status.textContent = 'Prêt.';
+          sendBtn.disabled = false;
+        }
+      }
+
+      function playAudio(url) {
+        if (!url) return;
+        status.textContent = "Lecture de la réponse audio…";
+        fetch(url)
+          .then(resp => resp.blob())
+          .then(blob => {
+            audioEl.src = URL.createObjectURL(blob);
+            audioEl.classList.remove('hidden');
+            audioEl.play();
+            audioEl.onended = () => status.textContent = 'Prêt.';
+          })
+          .catch(err => console.error(err));
+      }
+
+      sendBtn.addEventListener('click', () => {
+        const text = input.value.trim();
+        if (!text) return;
+        sendBtn.disabled = true;
+        status.textContent = "L'IA réfléchit…";
+        input.value = '';
+        sendText(text);
+      });
+
+      voiceBtn.addEventListener('click', async () => {
+        voiceBtn.disabled = true;
+        status.textContent = 'Parlez maintenant…';
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+          addMessage('Impossible d\'accéder au micro.', 'bot');
+          voiceBtn.disabled = false;
+          status.textContent = 'Prêt.';
+          return;
+        }
+
+        const recorder = new MediaRecorder(stream);
+        const chunks = [];
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onerror = e => {
+          addMessage('Erreur lors de l\'enregistrement audio.', 'bot');
+          console.error(e);
+          voiceBtn.disabled = false;
+          status.textContent = 'Prêt.';
+        };
+        recorder.onstop = async () => {
+          status.textContent = "Envoi de l'audio…";
+          const blob = new Blob(chunks, { type: 'audio/wav' });
+          const form = new FormData();
+          form.append('audio', blob, 'question.wav');
+          try {
+            const res = await fetch('/rag/audio', { method: 'POST', body: form });
+            const data = await res.json();
+            addMessage(data.answer, 'bot');
+            playAudio(data.audio_url);
+          } catch (err) {
+            addMessage('Erreur de communication avec le serveur.', 'bot');
+            console.error(err);
+          } finally {
+            voiceBtn.disabled = false;
+            status.textContent = 'Prêt.';
+          }
+        };
+
+        recorder.start();
+        setTimeout(() => recorder.stop(), 5000);
+      });
+    });
+  </script>
+</body>
+</html>
